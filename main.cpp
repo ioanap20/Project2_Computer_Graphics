@@ -176,6 +176,36 @@ void save_frame(const std::vector<Polygon>& cells, std::string filename, int fra
     stbi_write_png(os.str().c_str(), W, H, 3, image.data(), W * 3);
 }
 
+void save_svg(const std::vector<Polygon>& polygons, std::string filename, const std::vector<Vector>* points = NULL, std::string fillcol = "none") {
+    FILE* f = fopen(filename.c_str(), "w+");
+    fprintf(f, "<svg xmlns = \"http://www.w3.org/2000/svg\" width = \"1000\" height = \"1000\">\n");
+    for (int i = 0; i < polygons.size(); i++) {
+        fprintf(f, "<g>\n");
+        fprintf(f, "<polygon points = \"");
+        for (int j = 0; j < polygons[i].vertices.size(); j++) {
+            fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
+        }
+        fprintf(f, "\"\nfill = \"%s\" stroke = \"black\"/>\n", fillcol.c_str());
+        fprintf(f, "</g>\n");
+    }
+
+    if (points) {
+        fprintf(f, "<g>\n");
+        for (int i = 0; i < points->size(); i++) {
+            fprintf(f, "<circle cx = \"%3.3f\" cy = \"%3.3f\" r = \"3\" />\n", (*points)[i][0] * 1000., 1000. - (*points)[i][1] * 1000);
+        }
+        fprintf(f, "</g>\n");
+
+    }
+
+    fprintf(f, "</svg>\n");
+    fclose(f);
+}
+
+bool inside(Vector X, const Vector P0, const Vector Pi){
+        return (X - P0).norm2() <= (X - Pi).norm2();
+    }
+
 
 class VoronoiDiagram {
 
@@ -193,6 +223,25 @@ public:
         //      For all other sites Pj (optionally, only k nearest neighbors) :
         //          Clip it with bisector of [Pi,Pj]
         //      (Lab 3, fluids) : also clip it by a disk of radius sqrt(w_i - w_air) centered at Pi
+    
+        cells.clear();
+        cells.resize(points.size());
+        for(int i=0; i<points.size(); i++){
+            Polygon cell;
+            cell.vertices.push_back(Vector(0, 0));
+            cell.vertices.push_back(Vector(1, 0));
+            cell.vertices.push_back(Vector(1, 1));
+            cell.vertices.push_back(Vector(0, 1));
+
+            for(int j=0; j< points.size(); j++){
+                if(i==j){
+                    continue;
+                }
+                cell = clip_by_bisector(cell, points[i], points[j], 0, 0);
+                
+            }
+            cells[i] = cell;
+        }
     }
 
 
@@ -206,8 +255,7 @@ public:
 
         return result;
     }
-
-    static Polygon clip_by_bisector(const Polygon& V, const Vector& Pi, const Vector& Pj, double w0, double wi) {
+    static Polygon clip_by_bisector(const Polygon& V, const Vector& P0, const Vector& Pi, double w0, double wi) {
 
         // TODO Lab 1 (Voronoi) : in Lab 1, we assume w0 = w1 = 0
         // Clip a polygon by the bisector of the segment defined by P0 (the current site of the Voronoi cell being computed) and Pi (another site)
@@ -215,6 +263,32 @@ public:
         // TODO Lab 2 (Semi-Discrete Optimal Transport) : extend to Laguerre cells, i.e., w0 != w1
 
         Polygon result;
+
+        int n = V.vertices.size();
+
+        for(int i=0; i < n ; i++){
+            Vector curVertex = V.vertices[i];
+            Vector preVertex = V.vertices[(i>0)?(i-1):(n-1)];
+            Vector M = (Pi + P0) / 2;
+
+            Vector A = preVertex;
+            Vector B = curVertex;
+
+            
+            double t = dot(M-A, Pi-P0) / dot(B-A, Pi-P0);
+
+            Vector P = A + t*(B-A);
+            if(inside(B, P0, Pi)){
+                if(!inside(A, P0, Pi)){
+                    result.vertices.push_back(P);
+                }
+                result.vertices.push_back(B);
+            }
+            else if (inside(A, P0, Pi)){
+                    result.vertices.push_back(P);
+                }
+        
+        }
 
         return result;
     }
@@ -336,32 +410,11 @@ public:
     double fluid_volume; // you decide the fraction of the unit square occupied by the fluid
 };
 
-// saves a static svg file. The polygon vertices are supposed to be in the range [0..1], and a canvas of size 1000x1000 is created
-void save_svg(const std::vector<Polygon>& polygons, std::string filename, std::string fillcol = "none") {
-    FILE* f = fopen(filename.c_str(), "w+");
-    fprintf(f, "<svg xmlns = \"http://www.w3.org/2000/svg\" width = \"1000\" height = \"1000\">\n");
-    for (int i = 0; i < polygons.size(); i++) {
-        fprintf(f, "<g>\n");
-        fprintf(f, "<polygon points = \"");
-        for (int j = 0; j < polygons[i].vertices.size(); j++) {
-            fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
-        }
-        fprintf(f, "\"\nfill = \"%s\" stroke = \"black\"/>\n", fillcol.c_str());
-        fprintf(f, "</g>\n");
-    }
-    fprintf(f, "</svg>\n");
-    fclose(f);
-}
-
-
-
-
-
 
 
 int main() {
 
-    Polygon p;
+    /*Polygon p;
     p.vertices.push_back(Vector(0.1, 0.2));
     p.vertices.push_back(Vector(0.6, 0.4));
     p.vertices.push_back(Vector(0.5, 0.7));
@@ -371,6 +424,17 @@ int main() {
     s.push_back(p);
 
     save_frame(s, "toto");
-    save_svg(s, "toto.svg");
+    save_svg(s, "toto.svg");*/
+
+    VoronoiDiagram vor;
+    vor.points.push_back(Vector(0.1, 0.2));
+    vor.points.push_back(Vector(0.6, 0.4));
+    vor.points.push_back(Vector(0.5, 0.7));
+    vor.points.push_back(Vector(0.2, 0.5));
+
+    vor.compute();
+
+    save_frame(vor.cells, "vornoi");
+    save_svg(vor.cells, "vornoi.svg");
     return 0;
 }
