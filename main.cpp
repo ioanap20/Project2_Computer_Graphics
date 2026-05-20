@@ -52,6 +52,9 @@ Vector operator/(const Vector& a, const double b) {
 double dot(const Vector& a, const Vector& b) {
     return a[0] * b[0] + a[1] * b[1];
 }
+double cross(const Vector& a, const Vector& b) {
+	return a[0] * b[1] - a[1] * b[0];
+}
 
 
 class Polygon {
@@ -59,9 +62,18 @@ public:
 
     double area() {
         if (vertices.size() < 3) return 0;
-        // TODO Lab 3
+        // TODO Lab 2
         // Compute the area of the polygon
-        return -111;
+        double area = 0.0;
+        for(int i = 0; i < vertices.size(); i++){
+            Vector v1 = vertices[i];
+            Vector v2 = vertices[i+1];
+
+            area += v1[0]*v2[1] - v2[0]*v1[1];
+
+        }
+        area = area * (1/2);
+        return area;
     }
 
     Vector centroid() {
@@ -75,10 +87,21 @@ public:
     double integral_square_distance(const Vector& Pi) {
         if (vertices.size() < 3) return 0;
 
-        // TODO Lab 3
+        // TODO Lab 2
         // Compute the integral of ||x-Pi||^2 over the polygon
+        double sum = 0.0;
+        for(int i=0; i<vertices.size(); i++){
+            Vector T[3] = {vertices[0], vertices[i], vertices[i+1]};
+            double abs_T = 1/2 * cross((T[1] - T[0]), (T[2] - T[0]));
+            for(int k=0; k<3; k++){
+                for(int l = 0; l < 3; l++){
+                    sum += dot(T[k] - Pi, T[l] - Pi);
+                }
+            }
+            sum = sum * (abs_T / 6);
+    }
 
-        return -111;
+        return sum;
     }
 
     std::vector<Vector> vertices;
@@ -339,8 +362,16 @@ static lbfgsfloatval_t evaluate(
     // Lab 3 (fluid) : adapt these functions to support partial optimal transport (now "n" has been increased by 1 to account for the air variable)
     
     lbfgsfloatval_t fx = 0.0;
-    // g[i] = ...
+    // g[i] = 
     // fx = ...
+    double sum = 0.0;
+    double extra = 0.0;
+    for(int i=0; i < ot->vor.cells.size(); i ++){
+        extra += 1/n * ot->vor.weights[i];
+        sum += ot->vor.cells[i].integral_square_distance(ot->vor.points[i]) - ot->vor.cells[i].area();
+        g[i] = 1/n - ot->vor.cells[i].area();
+    }
+    fx = sum + extra;
 
     return fx;
 }
@@ -442,3 +473,8 @@ int main() {
     save_svg(vor.cells, "vornoi.svg");
     return 0;
 }
+
+/*
+clang -I. -c lbfgs.c -o lbfgs.o
+clang++ -std=c++11 -I. main.cpp lbfgs.o -o project2
+*/
