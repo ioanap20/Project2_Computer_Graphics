@@ -202,8 +202,8 @@ void save_svg(const std::vector<Polygon>& polygons, std::string filename, const 
     fclose(f);
 }
 
-bool inside(Vector X, const Vector P0, const Vector Pi){
-        return (X - P0).norm2() <= (X - Pi).norm2();
+bool inside(Vector X, const Vector P0, const Vector Pi, double wi, double wj){
+        return (X - P0).norm2() - wj <= (X - Pi).norm2() - wi;
     }
 
 
@@ -226,6 +226,9 @@ public:
     
         cells.clear();
         cells.resize(points.size());
+
+
+
         for(int i=0; i<points.size(); i++){
             Polygon cell;
             cell.vertices.push_back(Vector(0, 0));
@@ -237,7 +240,7 @@ public:
                 if(i==j){
                     continue;
                 }
-                cell = clip_by_bisector(cell, points[i], points[j], 0, 0);
+                cell = clip_by_bisector(cell, points[i], points[j], weights[i], weights[j]);
                 
             }
             cells[i] = cell;
@@ -271,19 +274,21 @@ public:
             Vector preVertex = V.vertices[(i>0)?(i-1):(n-1)];
             Vector M = (Pi + P0) / 2;
 
+            Vector M_prime = M + ((w0 - wi) / (2 * (P0 - Pi).norm2()) * (Pi - P0));
+
             Vector A = preVertex;
             Vector B = curVertex;
             
-            double t = dot(M-A, Pi-P0) / dot(B-A, Pi-P0);
+            double t = dot(M_prime-A, Pi-P0) / dot(B-A, Pi-P0);
 
             Vector P = A + t*(B-A);
-            if(inside(B, P0, Pi)){
-                if(!inside(A, P0, Pi)){
+            if(inside(B, P0, Pi, wi, w0)){
+                if(!inside(A, P0, Pi, wi, w0)){
                     result.vertices.push_back(P);
                 }
                 result.vertices.push_back(B);
             }
-            else if (inside(A, P0, Pi)){
+            else if (inside(A, P0, Pi, wi, w0)){
                     result.vertices.push_back(P);
                 }
         
