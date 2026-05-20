@@ -273,7 +273,6 @@ public:
 
             Vector A = preVertex;
             Vector B = curVertex;
-
             
             double t = dot(M-A, Pi-P0) / dot(B-A, Pi-P0);
 
