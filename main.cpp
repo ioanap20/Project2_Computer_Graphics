@@ -2,6 +2,8 @@
 
 #include <iostream>
 #include <sstream>
+#include <cmath>
+#include <random>
 
 #include <vector>
 
@@ -61,18 +63,18 @@ class Polygon {
 public:
 
     double area() {
-        if (vertices.size() < 3) return 0;
+        if (vertices.size() < 3) return 0.0;
         // TODO Lab 2
         // Compute the area of the polygon
         double area = 0.0;
         for(int i = 0; i < vertices.size(); i++){
-            Vector v1 = vertices[i];
-            Vector v2 = vertices[i+1];
+            const Vector& v1 = vertices[i];
+            const Vector& v2 = vertices[(i+1) % vertices.size()];
 
-            area += v1[0]*v2[1] - v2[0]*v1[1];
+            area += cross(v1, v2);
 
         }
-        area = area * (1/2);
+        area = fabs(area) * 0.5;
         return area;
     }
 
@@ -92,13 +94,13 @@ public:
         double sum = 0.0;
         for(int i=0; i<vertices.size(); i++){
             Vector T[3] = {vertices[0], vertices[i], vertices[i+1]};
-            double abs_T = 1/2 * cross((T[1] - T[0]), (T[2] - T[0]));
+            double abs_T = 0.5 * std::fabs(cross((T[1] - T[0]), (T[2] - T[0])));
             for(int k=0; k<3; k++){
                 for(int l = 0; l < 3; l++){
                     sum += dot(T[k] - Pi, T[l] - Pi);
                 }
             }
-            sum = sum * (abs_T / 6);
+            sum += sum * abs_T / 6.0;
     }
 
         return sum;
@@ -249,8 +251,7 @@ public:
     
         cells.clear();
         cells.resize(points.size());
-
-
+        weights.resize(points.size());
 
         for(int i=0; i<points.size(); i++){
             Polygon cell;
@@ -264,7 +265,7 @@ public:
                     continue;
                 }
                 cell = clip_by_bisector(cell, points[i], points[j], weights[i], weights[j]);
-                
+                if(cell.vertices.empty()) break;
             }
             cells[i] = cell;
         }
@@ -364,14 +365,17 @@ static lbfgsfloatval_t evaluate(
     lbfgsfloatval_t fx = 0.0;
     // g[i] = 
     // fx = ...
-    double sum = 0.0;
-    double extra = 0.0;
+    
     for(int i=0; i < ot->vor.cells.size(); i ++){
-        extra += 1/n * ot->vor.weights[i];
-        sum += ot->vor.cells[i].integral_square_distance(ot->vor.points[i]) - ot->vor.cells[i].area();
-        g[i] = 1/n - ot->vor.cells[i].area();
+        double area_i = ot->vor.cells[i].area();
+        double lambda_i = 1.0 / n;
+        double weight_i = ot->vor.weights[i];
+        
+        double integral_i = ot->vor.cells[i].integral_square_distance(ot->vor.points[i]);
+        double gi = integral_i - weight_i * area_i + lambda_i * weight_i;
+        fx -= gi;
+        g[i] = area_i - lambda_i;
     }
-    fx = sum + extra;
 
     return fx;
 }
@@ -449,6 +453,11 @@ public:
 
 int main() {
 
+    int N = 100;
+    std::default_random_engine gen(42);
+    std::uniform_real_distribution<double>U(0.0, 1.0);
+
+
     /*Polygon p;
     p.vertices.push_back(Vector(0.1, 0.2));
     p.vertices.push_back(Vector(0.6, 0.4));
@@ -469,8 +478,24 @@ int main() {
 
     vor.compute();
 
-    save_frame(vor.cells, "vornoi");
-    save_svg(vor.cells, "vornoi.svg");
+    OptimalTransport ot;
+
+    for(int i=0; i<N; i++){
+        double x = U(gen);
+        double y = U(gen);
+
+        ot.vor.points.push_back(Vector(x, y));
+    }
+
+    ot.vor.weights.assign(N, 0.0);
+
+    ot.vor.weights.resize(ot.vor.points.size(), 0.0);
+
+    ot.optimize();
+    
+
+    save_frame(ot.vor.cells, "lab2");
+    save_svg(ot.vor.cells, "lab2.svg", &ot.vor.points, "white");
     return 0;
 }
 
