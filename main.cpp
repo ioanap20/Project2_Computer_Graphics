@@ -3,9 +3,15 @@
 #include <iostream>
 #include <sstream>
 #include <cmath>
+#include <algorithm>
+#include <cstdio>
 #include <random>
+#include <cstring>
 
 #include <vector>
+#ifndef M_PI
+#define M_PI 3.14159
+#endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -62,7 +68,7 @@ double cross(const Vector& a, const Vector& b) {
 class Polygon {
 public:
 
-    double area() {
+    double area() const {
         if (vertices.size() < 3) return 0.0;
         // TODO Lab 2
         // Compute the area of the polygon
@@ -82,8 +88,24 @@ public:
         if (vertices.size() < 3) return Vector(0, 0);
         // TODO Lab 3
         // Compute the centroid of the polygon
+        double area = 0.0;
+        Vector C(0.0);
+        
+        for(int i=1; i < vertices.size() - 1; i++){
+            const Vector& v1 = vertices[i];
+            const Vector& v2 = vertices[(i+1)];
+            Vector triangle_centroid = (vertices[0] + v1 + v2) / 3.0;
 
-        return Vector(-111,-111);
+            double c = cross(v1 - vertices[0], v2 - vertices[0]);
+            double T = 0.5 * std::abs(c);
+            area += T;
+
+            C = C + T * triangle_centroid;
+
+        }
+        if(area < 1e-10) return Vector(0, 0);
+        return C / area;
+
     }
 
     double integral_square_distance(const Vector& Pi) {
@@ -92,15 +114,16 @@ public:
         // TODO Lab 2
         // Compute the integral of ||x-Pi||^2 over the polygon
         double sum = 0.0;
-        for(int i=0; i<vertices.size(); i++){
+        for(int i=1; i<vertices.size() - 1; i++){
             Vector T[3] = {vertices[0], vertices[i], vertices[i+1]};
             double abs_T = 0.5 * std::fabs(cross((T[1] - T[0]), (T[2] - T[0])));
+            double s = 0.0;
             for(int k=0; k<3; k++){
-                for(int l = 0; l < 3; l++){
-                    sum += dot(T[k] - Pi, T[l] - Pi);
+                for(int l = k; l < 3; l++){
+                    s += dot(T[k] - Pi, T[l] - Pi);
                 }
             }
-            sum += sum * abs_T / 6.0;
+            sum += s * abs_T / 6.0;
     }
 
         return sum;
@@ -227,8 +250,8 @@ void save_svg(const std::vector<Polygon>& polygons, std::string filename, const 
     fclose(f);
 }
 
-bool inside(Vector X, const Vector P0, const Vector Pi, double wi, double wj){
-        return (X - P0).norm2() - wj <= (X - Pi).norm2() - wi;
+bool inside(Vector X, const Vector P0, const Vector Pi, double w0, double wi){
+        return (X - P0).norm2() - w0 <= (X - Pi).norm2() - wi;
     }
 
 
@@ -251,7 +274,16 @@ public:
     
         cells.clear();
         cells.resize(points.size());
-        weights.resize(points.size());
+
+        if(!use_partial){
+            weights.resize(points.size());;
+        }
+        else{
+            if(weights.size() != points.size() + 1){
+                weights.resize(points.size() + 1, 0.0);
+            }
+        }
+
 
         for(int i=0; i<points.size(); i++){
             Polygon cell;
@@ -267,9 +299,31 @@ public:
                 cell = clip_by_bisector(cell, points[i], points[j], weights[i], weights[j]);
                 if(cell.vertices.empty()) break;
             }
-            cells[i] = cell;
+            if(use_partial && !cell.vertices.empty()){
+                double w_air = weights[points.size()];
+                if(weights[i] > w_air){
+                    double r2 = std::sqrt(weights[i] - w_air);
+
+                    for(int k=0;k<disk_samples;k++){
+                    double theta0 = 2.0 * M_PI * k / disk_samples;
+                    double theta1 = 2.0 * M_PI * (k+1) / disk_samples;
+
+                    Vector u(points[i][0] + r2*std::cos(theta0), points[i][1] + r2*std::sin(theta0));
+                    Vector v(points[i][0] + r2*std::cos(theta1), points[i][1] + r2*std::sin(theta1));
+
+                    cell = clip_by_edge(cell, u, v);
+
+                    if(cell.vertices.empty()) break;
+                }
+                }
+                 else{
+                cell.vertices.clear();
+            }
         }
+            cells[i] = cell;
+            
     }
+}
 
 
     static Polygon clip_by_edge(const Polygon& V, const Vector& u, const Vector& v) {
@@ -279,8 +333,48 @@ public:
         // Will be used to clip a polygon (a cell) by all the edges of a (discretized) disk
 
         Polygon result;
+        Vector edge = v - u;
+        double len = std::sqrt(edge[0] * edge[0] + edge[1] * edge[1]);
+        Vector n(-edge[1] / len, edge[0] / len);
+
+        auto inside_edge = [&](const Vector& P){
+            return dot(P - u, n) >= 0;
+        };
+
+        for(int i=0; i<V.vertices.size(); i++){
+            Vector A = V.vertices[(i > 0) ? i - 1 : V.vertices.size() - 1];
+            Vector B = V.vertices[i];
+
+            bool A_inside = inside_edge(A);
+            bool B_inside = inside_edge(B);
+
+            if(B_inside){
+                if(!A_inside){
+                    double denom = dot(B - A, n);
+                    Vector P = A + (dot(u - A, n) / denom) * (B-A);
+                    result.vertices.push_back(P);
+                }
+                result.vertices.push_back(B);
+            }
+            else if(A_inside){
+                double denom = dot(B - A, n);
+                Vector P = A + (dot(u - A, n) / denom) * (B-A);
+                result.vertices.push_back(P);
+            }
+        }
 
         return result;
+    }
+    Vector intersect_edge(const Vector& A, const Vector& B, const Vector& u, const Vector& v){
+        Vector edge  = v - u;
+        double len = std::sqrt(edge[0] * edge[0] + edge[1] * edge[1]);
+        Vector n(-edge[1] / len, edge[0] / len);
+
+        double denom = dot(B - A, n);
+        if(std::abs(denom) < 1e-20) return A;
+
+        return A + (dot(u - A, n) / denom) * (B-A);
+
     }
     static Polygon clip_by_bisector(const Polygon& V, const Vector& P0, const Vector& Pi, double w0, double wi) {
 
@@ -302,18 +396,29 @@ public:
 
             Vector A = preVertex;
             Vector B = curVertex;
-            
-            double t = dot(M_prime-A, Pi-P0) / dot(B-A, Pi-P0);
 
-            Vector P = A + t*(B-A);
-            if(inside(B, P0, Pi, wi, w0)){
-                if(!inside(A, P0, Pi, wi, w0)){
-                    result.vertices.push_back(P);
+            bool A_inside = inside(A, P0, Pi, w0, wi);
+            bool B_inside = inside(B, P0, Pi, w0, wi);
+
+            if(B_inside){
+                if(!A_inside){
+
+                    double denom = dot(B - A, Pi- P0);
+                    if(std::abs(denom) > 1e-20){
+                        double t = dot(M_prime-A, Pi-P0) / denom;
+                        Vector P = A + t*(B-A);
+                        result.vertices.push_back(P);
+                    }
                 }
                 result.vertices.push_back(B);
             }
-            else if (inside(A, P0, Pi, wi, w0)){
-                    result.vertices.push_back(P);
+            else if (A_inside){
+                    double denom = dot(B - A, Pi- P0);
+                    if(std::abs(denom) > 1e-20){
+                        double t = dot(M_prime-A, Pi-P0) / denom;
+                        Vector P = A + t*(B-A);
+                        result.vertices.push_back(P);
+                    }
                 }
         
         }
@@ -328,6 +433,8 @@ public:
     
     std::vector<Polygon> cells;   // Lab 1 : the polygons representing each individual cell
 
+    bool use_partial = false;
+    int disk_samples = 32;
 };
 
 
@@ -340,6 +447,9 @@ public:
     void optimize();
 
     VoronoiDiagram vor;
+    double fluid_volume = 0.4;
+    bool use_partial = false;
+    int disk_samples = 32;
 };
 
 
@@ -356,6 +466,8 @@ static lbfgsfloatval_t evaluate(
 
     // first compute the Voronoi diagram at the current optimization step
     memcpy(&ot->vor.weights[0], x, n * sizeof(x[0]));
+     int N = ot->vor.points.size();
+    
     ot->vor.compute();
   
    
@@ -363,21 +475,35 @@ static lbfgsfloatval_t evaluate(
     // Lab 3 (fluid) : adapt these functions to support partial optimal transport (now "n" has been increased by 1 to account for the air variable)
     
     lbfgsfloatval_t fx = 0.0;
+    double ddesired_fluid_volume = ot->fluid_volume;
+    double desired_air_volume = 1.0 - ddesired_fluid_volume;
+
+    double estimated_fluid_volume = 0.0;
+
+    double target = ddesired_fluid_volume / (double)ot->vor.points.size();
     // g[i] = 
     // fx = ...
-    
-    for(int i=0; i < ot->vor.cells.size(); i ++){
+    for(int i=0; i < N; i ++){
         double area_i = ot->vor.cells[i].area();
-        double lambda_i = 1.0 / n;
         double weight_i = ot->vor.weights[i];
         
-        double integral_i = ot->vor.cells[i].integral_square_distance(ot->vor.points[i]);
-        double gi = integral_i - weight_i * area_i + lambda_i * weight_i;
-        fx -= gi;
-        g[i] = area_i - lambda_i;
+        double integral_i = ot->vor.cells[i].integral_square_distance(ot->vor.points[i]) - weight_i * area_i;
+        double extra_i = target * weight_i;
+        estimated_fluid_volume += area_i;
+        fx += integral_i + extra_i;
+    }
+    double estimated_air_volume = 1.0 - estimated_fluid_volume;
+    double w_air = ot->vor.weights[ot->vor.weights.size() - 1];
+    fx += w_air * (desired_air_volume - estimated_air_volume);
+
+    for(int i=0; i<ot -> vor.cells.size(); i++){
+        g[i] = ot->vor.cells[i].area() - target;
     }
 
-    return fx;
+    g[ot->vor.weights.size() - 1] = estimated_air_volume - desired_air_volume;
+
+    return -fx;
+
 }
 
 // Labs 2 and 3 : you may use this function to print debugging info.
@@ -418,6 +544,34 @@ void OptimalTransport::optimize() {
 class Fluid {
 public:
     Fluid(int N_particles = 1000) : N_particles(N_particles) {
+
+        fluid_volume = 0.25;
+        particles.clear();
+        velocities.clear();
+
+        particles.reserve(N_particles);
+        velocities.reserve(N_particles);
+
+        std::default_random_engine gen(42);
+        std::uniform_real_distribution<double> U(0.0, 1.0);
+
+        for(int i=0; i<N_particles; i++){
+            double x = 0.15 + 0.3 * U(gen);
+            double y = 0.10 + 0.7 * U(gen);
+
+            particles.push_back(Vector(x, y));
+            velocities.push_back(Vector(0, 0));
+        }
+
+        ot.vor.points = particles;
+        ot.vor.weights.assign(N_particles +  1, 1.0);
+        double r2 = fluid_volume / (M_PI * N_particles);
+        ot.vor.weights[N_particles] = 1.0 - r2;
+
+        ot.vor.disk_samples = 48;
+        ot.fluid_volume = fluid_volume;
+        ot.vor.compute();
+        ot.optimize();
     }
 
     // Lab 3 : advance the simulation dt in time
@@ -430,6 +584,53 @@ public:
         // TODO Lab 3 : 
         // Compute semi-discrete partial optimal transport
         // for all particles, add gravity and spring force towards cell centroid, integrate acceleration->velocity and velocity->position
+ 
+        ot.vor.points = particles;
+        ot.fluid_volume = fluid_volume;
+        ot.vor.use_partial = true;
+
+        ot.optimize();
+
+        for(int i=0; i<N_particles;i++){
+            if(ot.vor.cells[i].vertices.size() < 3) continue;
+
+            Vector C = ot.vor.cells[i].centroid();
+
+            Vector F_spring = (C - particles[i]) / epsilon2;
+            Vector F = F_spring + m_i * g;
+
+            Vector acceleration = F / m_i;
+
+            velocities[i] = velocities[i] + dt * acceleration;
+
+            velocities[i] = 0.999 * velocities[i];
+
+            particles[i] = particles[i] + dt * velocities[i];
+
+            double bounce = 0.5;
+
+            if(particles[i][0] < 0.0){
+                particles[i][0] = 0.0;
+                velocities[i][0] = -bounce * velocities[i][0];
+            }
+            if(particles[i][0] > 1.0){
+                particles[i][0] = 1.0;
+                velocities[i][0] = -bounce * velocities[i][0];
+            }
+            if(particles[i][1] < 0.0){
+                particles[i][1] = 0.0;
+                velocities[i][1] = -bounce * velocities[i][1];
+            }
+
+            if(particles[i][1] > 1.0){
+                particles[i][1] = 1.0;
+                velocities[i][1] = -bounce * velocities[i][1];
+            }
+        }
+
+        ot.vor.points = particles;
+        ot.vor.compute();
+    
     }
 
     // just run the full simulation
@@ -470,7 +671,7 @@ int main() {
     save_frame(s, "toto");
     save_svg(s, "toto.svg");*/
 
-    VoronoiDiagram vor;
+    /*VoronoiDiagram vor;
     vor.points.push_back(Vector(0.1, 0.2));
     vor.points.push_back(Vector(0.6, 0.4));
     vor.points.push_back(Vector(0.5, 0.7));
@@ -495,7 +696,10 @@ int main() {
     
 
     save_frame(ot.vor.cells, "lab2");
-    save_svg(ot.vor.cells, "lab2.svg", &ot.vor.points, "white");
+    save_svg(ot.vor.cells, "lab2.svg", &ot.vor.points, "white");*/
+
+    Fluid fluid(300);
+    fluid.run_simulation();
     return 0;
 }
 
